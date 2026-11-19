@@ -1,6 +1,9 @@
 from dataclasses import dataclass
 from enum import Enum
 import unicodedata
+import logging
+
+logger = logging.getLogger(__name__)
 
 MAX_LENGTH = 4000
 
@@ -36,6 +39,16 @@ def process(raw) -> ProcessResult:
         _ensure_not_empty(text)
         _ensure_within_max_length(text)
     except _Rejected as e:
+        logger.info(
+            "input rejected",
+            extra={
+                "error_code": e.error.name,
+                "input_type": type(raw).__name__,
+                "raw_length": (
+                    len(raw) if isinstance(raw, (str, bytes)) else None
+                ),  # str/bytes면 len(raw), 아니면 None
+            },
+        )
         return ProcessResult.reject(e.error)
     return ProcessResult.accept(text)
 

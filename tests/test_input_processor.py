@@ -1,6 +1,52 @@
-import pytest
+import logging
 import unicodedata
+
+import pytest
+
 from chatbot.input_processor import MAX_LENGTH, ErrorCode, process
+
+LOGGER_NAME = "chatbot.input_processor"
+
+
+def test_rejection_log_for_non_text_input_has_no_length(caplog):
+    caplog.set_level(logging.INFO, logger=LOGGER_NAME)
+
+    process(42)
+
+    record = caplog.records[0]
+    assert record.error_code == "INVALID_TYPE"
+    assert record.input_type == "int"
+    assert record.raw_length is None
+
+
+def test_rejection_is_logged_at_info_with_error_code(caplog):
+    caplog.set_level(logging.INFO, logger=LOGGER_NAME)
+
+    process("")
+
+    assert len(caplog.records) == 1
+    record = caplog.records[0]
+    assert record.levelno == logging.INFO
+    assert record.error_code == "EMPTY"
+
+
+def test_rejection_log_includes_input_metadata(caplog):
+    caplog.set_level(logging.INFO, logger=LOGGER_NAME)
+
+    process("a" * (MAX_LENGTH + 1))
+
+    record = caplog.records[0]
+    assert record.error_code == "TOO_LONG"
+    assert record.input_type == "str"
+    assert record.raw_length == MAX_LENGTH + 1
+
+
+def test_accepted_input_is_not_logged_at_info(caplog):
+    caplog.set_level(logging.INFO, logger=LOGGER_NAME)
+
+    process("안녕")
+
+    assert caplog.records == []
 
 
 def test_plain_text_is_accepted_as_is():
