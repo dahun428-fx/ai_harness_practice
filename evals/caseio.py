@@ -19,7 +19,7 @@ import unicodedata
 INPUT_KEYS = ("input", "input_bytes_hex", "input_repeat")
 
 # 화면에서 보이지 않거나 다른 문자와 헷갈리는 문자는 파일에 \uXXXX로 남긴다
-_ALWAYS_ESCAPE = set(" 　  �")
+_ALWAYS_ESCAPE = set("\u00a0\u3000\u2028\u2029\ufffd")
 _ESCAPE_CATEGORIES = {"Cc", "Cf", "Zs", "Zl", "Zp", "Mn", "Me", "Co", "Cn", "Cs"}
 
 

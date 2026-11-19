@@ -85,7 +85,7 @@ def test_accepted_input_is_not_logged_at_info(caplog):
     "raw, raw_length, normalized_length, changed",
     [
         ("안녕", 2, 2, False),
-        ("  안​녕\r\n", 7, 2, True),  # 공백 2 + 안 + ZWSP + 녕 + \r\n = 7
+        ("  안\u200b녕\r\n", 7, 2, True),  # 공백 2 + 안 + ZWSP + 녕 + \r\n = 7
         (unicodedata.normalize("NFD", "안녕"), 6, 2, True),
         ("안녕".encode("utf-8"), 6, 2, False),  # 디코딩은 정규화가 아니므로 changed가 아님
     ],
@@ -297,8 +297,8 @@ def test_newline_and_tab_are_preserved():
 @pytest.mark.parametrize(
     "raw",
     [
-        "\U0001f468\u200d\U0001f469\u200d\U0001f467",  # 👨‍👩‍👧 (ZWJ 시퀀스)
-        "\u2764\ufe0f",  # ❤️ (variation selector)
+        "\U0001f468\u200d\U0001f469\u200d\U0001f467",  # 👨\u200d👩\u200d👧 (ZWJ 시퀀스)
+        "\u2764\ufe0f",  # ❤\ufe0f (variation selector)
         "\U0001f44d\U0001f3fd",  # 👍🏽 (피부색 수정자)
     ],
     ids=["zwj-family", "variation-selector", "skin-tone"],
@@ -397,3 +397,59 @@ def test_invisible_characters_inside_crlf_do_not_split_line_break(raw):
 
     assert result.ok is True
     assert result.text == "첫줄\n둘째줄"
+
+
+@pytest.mark.parametrize(
+    "space",
+    ["\u00a0", "\u202f", "\u2003", "\u3000"],
+    ids=["nbsp", "narrow-nbsp", "em-space", "fullwidth-space"],
+)
+def test_special_spaces_inside_text_become_regular_space(space):
+    result = process(f"가격은{space}얼마야?")
+
+    assert result.ok is True
+    assert result.text == "가격은 얼마야?"
+
+
+def test_special_spaces_do_not_merge_or_disappear():
+    result = process("a\u00a0\u00a0b")
+
+    assert result.text == "a  b"  # 두 칸은 두 칸 그대로 (공백 압축 규칙 없음)
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("\x1b[31m빨강\x1b[0m", "빨강"),
+        ("\x1b[1;32mOK\x1b[0m done", "OK done"),
+        ("\x1b[2K\x1b[1G진행 100%", "진행 100%"),
+        (
+            "\x1b[31mFAILED\x1b[0m test_a\n\x1b[32mPASSED\x1b[0m test_b",
+            "FAILED test_a\nPASSED test_b",
+        ),
+    ],
+    ids=["color", "bold-color", "cursor-control", "pytest-output"],
+)
+def test_ansi_escape_sequences_are_removed_entirely(raw, expected):
+    result = process(raw)
+
+    assert result.ok is True
+    assert result.text == expected
+
+
+def test_ansi_sequence_split_by_invisible_char_is_still_removed():
+    # "보이지 않는 문자는 처음부터 없었던 것" 원칙: ESC와 [ 사이의 ZWSP 때문에 잔해가 남으면 안 된다
+    result = process("\x1b\u200b[31m빨강\x1b[0m")
+
+    assert result.text == "빨강"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["[31m] 대괄호는 그대로", "배열 a[0] 값", r"\x1b[31m 문자열로 쓴 이스케이프"],
+    ids=["bracket-text", "index", "escaped-literal"],
+)
+def test_bracket_text_without_esc_is_preserved(raw):
+    result = process(raw)
+
+    assert result.text == raw

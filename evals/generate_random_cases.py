@@ -30,16 +30,18 @@ BASES = [
     "React에서 상태 관리 뭐 써?",
     "def add(a, b):\n\treturn a + b",
     "첫 문단\n\n둘째 문단",
-    "\U0001F468‍\U0001F469‍\U0001F467 가족 여행 추천",
-    "고마워❤️",
+    "\U0001F468\u200d\U0001F469\u200d\U0001F467 가족 여행 추천",
+    "고마워❤\ufe0f",
     "\U0001F1F0\U0001F1F7 대한민국",
     "가격은 ₩12,000이야",
     "① 첫째 ② 둘째",
     "맥북에서 한글 파일명이 깨져",
 ]
 
-EDGE_WHITESPACE = [" ", "\t", "\n", "　", " "]
-INVISIBLE = ["​", "﻿", "\x00", "\x01", "\x07", "\x1b", "\x7f"]
+EDGE_WHITESPACE = [" ", "\t", "\n", "\u3000", "\u00a0"]
+# 어디에 끼워 넣어도 기대값이 바뀌지 않는 문자들.
+# ESC(\x1b)는 넣지 않는다: ANSI 시퀀스의 시작이라 시퀀스 중간에 끼면 의미가 바뀐다 (ANSI 제거 명세 이후).
+INVISIBLE = ["\u200b", "\ufeff", "\x00", "\x01", "\x07", "\x7f"]
 NON_TEXT = [None, 0, 3.14, True, [], {}, ["안녕"]]
 
 
@@ -69,12 +71,31 @@ def to_nfd(rng, s):
     return unicodedata.normalize("NFD", s)
 
 
+SPECIAL_SPACES = ["\u00a0", "\u202f", "\u2002", "\u2003", "\u2009", "\u3000"]
+ANSI_CODES = ["\x1b[31m", "\x1b[1;32m", "\x1b[0m", "\x1b[2K", "\x1b[1G", "\x1b[38;5;208m"]
+
+
+def special_spaces(rng, s):
+    """일반 공백 일부를 특수 공백(NBSP 등)으로 바꾼다. 정규화 후에는 다시 일반 공백이어야 한다."""
+    return "".join(rng.choice(SPECIAL_SPACES) if ch == " " and rng.random() < 0.6 else ch for ch in s)
+
+
+def ansi_wrap(rng, s):
+    """임의 위치에 ANSI 색상·커서 제어 시퀀스를 끼워 넣는다. 정규화 후에는 통째로 사라져야 한다."""
+    chars = list(s)
+    for _ in range(rng.randint(1, 3)):
+        chars.insert(rng.randint(0, len(chars)), rng.choice(ANSI_CODES))
+    return "".join(chars)
+
+
 NOISES = {
     "pad-edges": pad_edges,
     "insert-invisible": insert_invisible,
     "crlf": to_crlf,
     "cr": to_cr,
     "nfd": to_nfd,
+    "special-spaces": special_spaces,
+    "ansi": ansi_wrap,
 }
 
 
