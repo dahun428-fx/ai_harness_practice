@@ -4,6 +4,8 @@ from enum import Enum
 
 class ErrorCode(Enum):
     EMPTY = "EMPTY"
+    INVALID_TYPE = "INVALID_TYPE"
+    INVALID_ENCODING = "INVALID_ENCODING"
 
 
 @dataclass(frozen=True)
@@ -14,6 +16,15 @@ class ProcessResult:
 
 
 def process(raw) -> ProcessResult:
+    if not isinstance(raw, (str, bytes)):
+        return ProcessResult(ok=False, text=None, error=ErrorCode.INVALID_TYPE)
+
+    if isinstance(raw, bytes):
+        try:
+            raw = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return ProcessResult(ok=False, text=None, error=ErrorCode.INVALID_ENCODING)
+
     text = raw.strip()
     if not text:
         return ProcessResult(ok=False, text=None, error=ErrorCode.EMPTY)

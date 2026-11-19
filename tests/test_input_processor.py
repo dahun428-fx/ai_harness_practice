@@ -42,3 +42,48 @@ def test_blank_input_is_rejected_as_empty(raw):
     assert result.ok is False
     assert result.error is ErrorCode.EMPTY
     assert result.text is None
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [None, 123, ["안녕"], {"text": "안녕"}],
+    ids=["none", "int", "list", "dict"],
+)
+def test_non_text_input_is_rejected_as_invalid_type(raw):
+    result = process(raw)
+
+    assert result.ok is False
+    assert result.error is ErrorCode.INVALID_TYPE
+    assert result.text is None
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("안녕".encode("utf-8"), "안녕"),
+        ("  안녕  ".encode("utf-8"), "안녕"),
+    ],
+    ids=["utf8", "utf8-with-whitespace"],
+)
+def test_utf8_bytes_are_decoded(raw, expected):
+    result = process(raw)
+
+    assert result.ok is True
+    assert result.text == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "안녕".encode("cp949"),  # 한국어 Windows 기본 인코딩
+        b"\xff\xfe\xfd",  # UTF-8로 불가능한 바이트
+        "안".encode("utf-8")[:2],  # 잘린 UTF-8 (3바이트 중 2바이트만)
+    ],
+    ids=["cp949", "invalid-bytes", "truncated-utf8"],
+)
+def test_non_utf8_bytes_are_rejected_as_invalid_encoding(raw):
+    result = process(raw)
+
+    assert result.ok is False
+    assert result.error is ErrorCode.INVALID_ENCODING
+    assert result.text is None
