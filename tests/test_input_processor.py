@@ -270,3 +270,19 @@ def test_invisible_characters_between_decomposed_jamo_do_not_block_nfc(raw, expe
 
     assert result.ok is True
     assert result.text == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "첫줄\r\x1b\n둘째줄",
+        "첫줄\r\u200b\n둘째줄",
+        "첫줄\r\x00\x07\n둘째줄",
+    ],
+    ids=["escape", "zwsp", "multiple"],
+)
+def test_invisible_characters_inside_crlf_do_not_split_line_break(raw):
+    result = process(raw)
+
+    assert result.ok is True
+    assert result.text == "첫줄\n둘째줄"

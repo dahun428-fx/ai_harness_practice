@@ -69,8 +69,8 @@ def _ensure_not_empty(text: str):
 
 
 def _normalize(text: str) -> str:
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = text.translate(_REMOVE_INVISIBLE)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = unicodedata.normalize("NFC", text)
     return text
 
@@ -81,7 +81,7 @@ def _ensure_within_max_length(text: str):
 
 
 _INVISIBLE_CHARS = {
-    *(chr(c) for c in range(0x20) if c not in (0x09, 0x0A)),  # \t, \n 제외
+    *(chr(c) for c in range(0x20) if c not in (0x09, 0x0A, 0x0D)),  # \t, \n, \r 제외
     "\x7f",
     "\u200b",  # zero width space
     "\ufeff",  # BOM
