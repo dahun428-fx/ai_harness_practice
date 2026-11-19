@@ -1,7 +1,7 @@
+import logging
+import unicodedata
 from dataclasses import dataclass
 from enum import Enum
-import unicodedata
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +32,9 @@ class ProcessResult:
 
 def process(raw) -> ProcessResult:
     try:
-        text = _decode(raw)
-        _ensure_utf8_encodable(text)
-        text = _normalize(text)
+        decoded = _decode(raw)
+        _ensure_utf8_encodable(decoded)
+        text = _normalize(decoded)
         text = text.strip()
         _ensure_not_empty(text)
         _ensure_within_max_length(text)
@@ -44,13 +44,26 @@ def process(raw) -> ProcessResult:
             extra={
                 "error_code": e.error.name,
                 "input_type": type(raw).__name__,
-                "raw_length": (
-                    len(raw) if isinstance(raw, (str, bytes)) else None
-                ),  # str/bytes면 len(raw), 아니면 None
+                "raw_length": _raw_length(raw),
             },
         )
         return ProcessResult.reject(e.error)
+
+    # 원문은 남기지 않는다. 정규화가 입력을 바꿨는지와 길이만 기록한다.
+    logger.debug(
+        "input accepted",
+        extra={
+            "input_type": type(raw).__name__,
+            "raw_length": _raw_length(raw),
+            "normalized_length": len(text),
+            "changed": text != decoded,
+        },
+    )
     return ProcessResult.accept(text)
+
+
+def _raw_length(raw) -> int | None:
+    return len(raw) if isinstance(raw, (str, bytes)) else None
 
 
 class _Rejected(Exception):

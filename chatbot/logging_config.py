@@ -14,6 +14,8 @@ class JsonFormatter(logging.Formatter):
             "message": record.getMessage(),
         }
         data.update({k: v for k, v in vars(record).items() if k not in _STANDARD_ATTRS})
+        if record.exc_info:  # exc_info는 기본 속성이라 위에서 걸러지므로 따로 담는다
+            data["exception"] = self.formatException(record.exc_info)
         return json.dumps(data, ensure_ascii=False, default=str)
 
 

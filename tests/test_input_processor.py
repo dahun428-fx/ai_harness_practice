@@ -81,6 +81,39 @@ def test_accepted_input_is_not_logged_at_info(caplog):
     assert caplog.records == []
 
 
+@pytest.mark.parametrize(
+    "raw, raw_length, normalized_length, changed",
+    [
+        ("안녕", 2, 2, False),
+        ("  안​녕\r\n", 7, 2, True),  # 공백 2 + 안 + ZWSP + 녕 + \r\n = 7
+        (unicodedata.normalize("NFD", "안녕"), 6, 2, True),
+        ("안녕".encode("utf-8"), 6, 2, False),  # 디코딩은 정규화가 아니므로 changed가 아님
+    ],
+    ids=["unchanged", "whitespace-and-invisible", "nfd", "utf8-bytes"],
+)
+def test_accepted_input_is_logged_at_debug_with_lengths(caplog, raw, raw_length, normalized_length, changed):
+    caplog.set_level(logging.DEBUG, logger=LOGGER_NAME)
+
+    process(raw)
+
+    assert len(caplog.records) == 1
+    record = caplog.records[0]
+    assert record.levelno == logging.DEBUG
+    assert record.getMessage() == "input accepted"
+    assert record.input_type == type(raw).__name__
+    assert record.raw_length == raw_length
+    assert record.normalized_length == normalized_length
+    assert record.changed is changed
+
+
+def test_rejection_is_logged_once_even_at_debug(caplog):
+    caplog.set_level(logging.DEBUG, logger=LOGGER_NAME)
+
+    process("")
+
+    assert [r.levelno for r in caplog.records] == [logging.INFO]
+
+
 def test_plain_text_is_accepted_as_is():
     result = process("안녕")
 

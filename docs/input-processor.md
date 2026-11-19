@@ -36,6 +36,18 @@
 >
 > 두 경우 모두 eval 무작위 케이스(`evals/generate_random_cases.py`, seed 42·7)에서 발견했다.
 
+## 로깅
+
+로거 `chatbot.input_processor`. 원문(입력 텍스트)은 어떤 레벨에서도 기록하지 않는다.
+
+| 상황 | 레벨 | message | 필드 |
+| ---- | ---- | ------- | ---- |
+| 거부 | INFO | `input rejected` | `error_code`, `input_type`, `raw_length`(str/bytes가 아니면 `null`) |
+| 통과 | DEBUG | `input accepted` | `input_type`, `raw_length`, `normalized_length`, `changed`(정규화가 내용을 바꿨는지) |
+
+앱(`main.py`)은 `logs/chatbot.log`에 JSON Lines로 남긴다. `LOG_LEVEL=DEBUG`는 `chatbot.*` 로거에만 적용한다
+(외부 라이브러리의 DEBUG 로그에는 대화 내용이 들어갈 수 있으므로).
+
 ## 범위 밖
 
 - 명령어(`/exit` 등) 분류

@@ -1,5 +1,6 @@
 import json
 import logging
+import sys
 
 from chatbot.logging_config import JsonFormatter, setup_logging
 
@@ -65,3 +66,22 @@ def test_keeps_korean_readable():
     line = JsonFormatter().format(make_record(msg="입력 거부"))
 
     assert "입력 거부" in line
+
+
+def test_includes_exception_traceback():
+    try:
+        raise ValueError("boom")
+    except ValueError:
+        record = make_record(msg="query failed")
+        record.exc_info = sys.exc_info()
+
+    data = json.loads(JsonFormatter().format(record))
+
+    assert "ValueError: boom" in data["exception"]
+    assert "Traceback" in data["exception"]
+
+
+def test_omits_exception_field_when_there_is_no_exception():
+    data = json.loads(JsonFormatter().format(make_record()))
+
+    assert "exception" not in data
