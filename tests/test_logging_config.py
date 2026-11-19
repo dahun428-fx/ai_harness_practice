@@ -2,7 +2,9 @@ import json
 import logging
 import sys
 
-from chatbot.logging_config import JsonFormatter, setup_logging
+from logging.handlers import RotatingFileHandler
+
+from chatbot.logging_config import JsonFormatter, set_session_id, setup_logging
 
 
 def test_setup_logging_writes_json_lines_to_file(tmp_path):
@@ -19,6 +21,46 @@ def test_setup_logging_writes_json_lines_to_file(tmp_path):
 
     lines = log_file.read_text(encoding="utf-8").splitlines()
     assert json.loads(lines[-1])["error_code"] == "EMPTY"
+
+
+def _log_through_setup(tmp_path, emit, **kwargs):
+    log_file = tmp_path / "logs" / "chatbot.log"
+    handler = setup_logging(log_file, level="INFO", **kwargs)
+    try:
+        emit()
+        handler.flush()
+    finally:
+        logging.getLogger().removeHandler(handler)
+        handler.close()
+        set_session_id(None)
+    return handler, [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines()]
+
+
+def test_every_log_line_carries_current_session_id(tmp_path):
+    def emit():
+        set_session_id("abc123")
+        logging.getLogger("chatbot.main").info("session started")
+        logging.getLogger("claude_agent_sdk.x").info("sdk says hi")  # 외부 라이브러리 로그에도 붙어야 함
+
+    _, rows = _log_through_setup(tmp_path, emit)
+
+    assert [r["session_id"] for r in rows] == ["abc123", "abc123"]
+
+
+def test_session_id_is_omitted_when_not_set(tmp_path):
+    _, rows = _log_through_setup(tmp_path, lambda: logging.getLogger("chatbot.main").info("before session"))
+
+    assert "session_id" not in rows[0]
+
+
+def test_log_file_rotates_by_size(tmp_path):
+    handler, _ = _log_through_setup(
+        tmp_path, lambda: logging.getLogger("chatbot.main").info("x"), max_bytes=1_000, backup_count=3
+    )
+
+    assert isinstance(handler, RotatingFileHandler)
+    assert handler.maxBytes == 1_000
+    assert handler.backupCount == 3
 
 
 def make_record(msg="input rejected", **extra):
