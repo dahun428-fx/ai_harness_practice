@@ -14,37 +14,10 @@
 """
 
 import json
-import unicodedata
+
+from chatbot.jsonl import dumps  # noqa: F401  (케이스 파일 쓰기에 사용)
 
 INPUT_KEYS = ("input", "input_bytes_hex", "input_repeat")
-
-# 화면에서 보이지 않거나 다른 문자와 헷갈리는 문자는 파일에 \uXXXX로 남긴다
-_ALWAYS_ESCAPE = set("\u00a0\u3000\u2028\u2029\ufffd")
-_ESCAPE_CATEGORIES = {"Cc", "Cf", "Zs", "Zl", "Zp", "Mn", "Me", "Co", "Cn", "Cs"}
-
-
-def _needs_escape(ch: str) -> bool:
-    if ch == " ":
-        return False
-    if ch in _ALWAYS_ESCAPE:
-        return True
-    if 0x1100 <= ord(ch) <= 0x11FF:  # 조합형(NFD) 한글 자모
-        return True
-    return unicodedata.category(ch) in _ESCAPE_CATEGORIES
-
-
-def _escape(ch: str) -> str:
-    cp = ord(ch)
-    if cp > 0xFFFF:
-        cp -= 0x10000
-        return "\\u%04x\\u%04x" % (0xD800 + (cp >> 10), 0xDC00 + (cp & 0x3FF))
-    return "\\u%04x" % cp
-
-
-def dumps(case: dict) -> str:
-    """한글·이모지는 그대로, 보이지 않는 문자만 이스케이프한 JSON 한 줄."""
-    raw = json.dumps(case, ensure_ascii=False)
-    return "".join(_escape(ch) if _needs_escape(ch) else ch for ch in raw)
 
 
 def load_cases(path: str) -> list[dict]:

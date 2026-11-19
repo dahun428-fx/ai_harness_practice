@@ -17,6 +17,7 @@ import sys
 import unicodedata
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import caseio  # noqa: E402
 
 MAX_LENGTH = 4000  # 명세 값. 구현에서 import하지 않는다 (구현이 틀려도 기대값은 명세를 따라야 함)
