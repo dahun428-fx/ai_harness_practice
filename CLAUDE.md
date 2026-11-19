@@ -17,7 +17,8 @@ pytest tests/test_input_processor.py -k nfc   # single test by name
 python evals/run_input_eval.py          # eval gate; exit 1 on failure; logs to evals/results/
 python evals/run_input_eval.py --id <case-id>        # inspect one eval case
 python evals/generate_random_cases.py --seed 7 --count 300 --out evals/tmp.jsonl   # fuzz cases (don't commit)
-python main.py                          # run the chatbot (LOG_LEVEL=DEBUG for chatbot.* debug logs)
+python main.py                          # run the chatbot (LOG_LEVEL=DEBUG for chatbot.* debug logs, TRACE=0 to disable traces)
+python evals/traces_to_cases.py         # turn traces into eval candidates (evals/candidates.jsonl) for human review
 ```
 
 CI (`.github/workflows/ci.yml`) runs pytest, the eval gate, and 5 random seeds × 300 cases on every push/PR.
@@ -28,12 +29,15 @@ CI (`.github/workflows/ci.yml`) runs pytest, the eval gate, and 5 random seeds �
 - **Order inside `_normalize` is load-bearing**: invisible-char removal must run before CSI/OSC stripping, CRLF folding, and NFC — eval fuzzing found real bugs when it didn't. ESC, BEL, `\r`, NEL are deliberately kept by the first step because later steps need them.
 - `chatbot/messages.py` — user-facing text per `ErrorCode`; a parametrized test forces a message for every enum member.
 - `chatbot/logging_config.py` — `JsonFormatter` (JSON Lines, `extra` fields included, tracebacks under `exception`) and `setup_logging()`, which attaches a handler to the root logger directly (`basicConfig` silently no-ops under pytest).
-- `main.py` — I/O only: stdin/stdout UTF-8, loop, SDK calls. Guarded by `if __name__ == "__main__"` so tests can import modules without starting the bot.
+- `main.py` — I/O only: stdin/stdout UTF-8, loop, SDK calls, one trace record per turn. Guarded by `if __name__ == "__main__"` so tests can import modules without starting the bot.
+- `chatbot/tracing.py` — `TraceWriter` writes raw input/output per turn to `traces/YYYY-MM-DD.jsonl` (spec: `docs/tracing.md`). Deliberately bypasses `logging` so content never reaches log handlers. `chatbot/jsonl.py` is the shared escaping serializer for traces and eval files.
+- `chatbot/logging_config.py` adds `session_id` to every log line via a handler filter (`set_session_id`) — the join key between `logs/` and `traces/`.
 - `evals/` — `caseio.py` (JSONL format, escapes invisible chars), `run_input_eval.py` (PASS/FAIL/REVIEW/ERROR per case, metrics, gate, run-to-run diff), `generate_random_cases.py` (clean base text + noise with known effect; labels come from the spec, never from `process()`).
 
 ## Rules
 
-- Never log raw user input or Claude output at any level; tests (`*_never_logged`) enforce it.
+- Operational logs (`logging`, `logs/`) never contain raw user input or Claude output at any level; tests (`*_never_logged`) enforce it. Raw content goes only to traces (`traces/`, git-ignored, retention-pruned).
+- Trace-derived candidates carry `label_status: "needs-review"`; their labels are the current implementation's output and must be reviewed before moving into `input_cases.jsonl`.
 - Eval labels are human/spec decisions. When the spec changes, update the generator's noise assumptions too (e.g. ESC/BEL were removed from "neutral" noise once they gained meaning).
 - Write invisible characters in source/tests/docs as `\uXXXX` escapes, never raw.
 - The user is learning TDD/EDD: by default give step-by-step guidance and verify their work ("확인해"); edit files directly only when they hand the task over.

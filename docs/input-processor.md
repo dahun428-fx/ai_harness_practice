@@ -92,8 +92,10 @@ ESC·BEL·`\r`·NEL은 제어 시퀀스와 줄바꿈의 일부라서 첫 단계�
 | 거부 | INFO | `input rejected` | `error_code`, `input_type`, `raw_length`(str/bytes가 아니면 `null`) |
 | 통과 | DEBUG | `input accepted` | `input_type`, `raw_length`, `normalized_length`, `changed`(정규화가 내용을 바꿨는지) |
 
-앱(`main.py`)은 `logs/chatbot.log`에 JSON Lines로 남긴다. `LOG_LEVEL=DEBUG`는 `chatbot.*` 로거에만 적용한다
+앱(`main.py`)은 `logs/chatbot.log`에 JSON Lines로 남긴다(5MB × 5개 회전, 모든 줄에 `session_id`). `LOG_LEVEL=DEBUG`는 `chatbot.*` 로거에만 적용한다
 (외부 라이브러리의 DEBUG 로그에는 대화 내용이 들어갈 수 있으므로).
+
+입력·응답 원문은 운영 로그가 아니라 트레이스(`traces/`)에 따로 남긴다 → `docs/tracing.md`
 
 ## 검증
 
