@@ -70,8 +70,8 @@ def _ensure_not_empty(text: str):
 
 def _normalize(text: str) -> str:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-    text = unicodedata.normalize("NFC", text)
     text = text.translate(_REMOVE_INVISIBLE)
+    text = unicodedata.normalize("NFC", text)
     return text
 
 

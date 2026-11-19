@@ -251,3 +251,22 @@ def test_length_is_measured_after_normalization(raw):
     result = process(raw)
 
     assert result.ok is True
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("\u110b\u200b\u1161\u11ab", "안"),  # 최소 재현: ㅇ + ZWSP + ㅏ + ㄴ
+        ("\u110b\u1161\u11ab\u1102\u1167\x00\u11bc", "안녕"),  # 받침 앞에 끼인 경우
+        (
+            "\u110b\x1b\u1161\u11ab\u1102\u1167\x01\u11bc\ud558\uc138\uc694",
+            "안녕하세요",
+        ),  # eval rand-42-042
+    ],
+    ids=["minimal", "before-final-consonant", "eval-rand-42-042"],
+)
+def test_invisible_characters_between_decomposed_jamo_do_not_block_nfc(raw, expected):
+    result = process(raw)
+
+    assert result.ok is True
+    assert result.text == expected
