@@ -65,6 +65,16 @@ def _ensure_not_empty(text: str):
 
 
 def _normalize(text: str) -> str:
-
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-    return unicodedata.normalize("NFC", text)
+    text = unicodedata.normalize("NFC", text)
+    text = text.translate(_REMOVE_INVISIBLE)
+    return text
+
+
+_INVISIBLE_CHARS = {
+    *(chr(c) for c in range(0x20) if c not in (0x09, 0x0A)),  # \t, \n 제외
+    "\x7f",
+    "\u200b",  # zero width space
+    "\ufeff",  # BOM
+}
+_REMOVE_INVISIBLE = str.maketrans(dict.fromkeys(_INVISIBLE_CHARS))

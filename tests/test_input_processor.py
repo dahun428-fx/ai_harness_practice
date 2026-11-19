@@ -151,3 +151,61 @@ def test_line_endings_are_normalized_to_lf(raw, expected):
 
     assert result.ok is True
     assert result.text == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["안\x00녕", "안\x07녕", "안\x1b녕", "안\x7f녕"],
+    ids=["null", "bell", "escape", "delete"],
+)
+def test_control_characters_are_removed(raw):
+    result = process(raw)
+
+    assert result.ok is True
+    assert result.text == "안녕"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["안\u200b녕", "\ufeff안녕", "\u200b안녕\u200b"],
+    ids=["zwsp-inside", "bom-leading", "zwsp-around"],
+)
+def test_zero_width_characters_are_removed(raw):
+    result = process(raw)
+
+    assert result.ok is True
+    assert result.text == "안녕"
+
+
+def test_newline_and_tab_are_preserved():
+    result = process("a\tb\nc")
+
+    assert result.text == "a\tb\nc"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "\U0001f468\u200d\U0001f469\u200d\U0001f467",  # 👨‍👩‍👧 (ZWJ 시퀀스)
+        "\u2764\ufe0f",  # ❤️ (variation selector)
+        "\U0001f44d\U0001f3fd",  # 👍🏽 (피부색 수정자)
+    ],
+    ids=["zwj-family", "variation-selector", "skin-tone"],
+)
+def test_emoji_sequences_are_preserved(raw):
+    result = process(raw)
+
+    assert result.ok is True
+    assert result.text == raw
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["\u200b", "\x00\x00", "\ufeff \u200b"],
+    ids=["zwsp-only", "nulls-only", "bom-space-zwsp"],
+)
+def test_only_invisible_characters_is_rejected_as_empty(raw):
+    result = process(raw)
+
+    assert result.ok is False
+    assert result.error is ErrorCode.EMPTY
