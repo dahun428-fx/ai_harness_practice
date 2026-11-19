@@ -40,8 +40,14 @@ BASES = [
 
 EDGE_WHITESPACE = [" ", "\t", "\n", "\u3000", "\u00a0"]
 # 어디에 끼워 넣어도 기대값이 바뀌지 않는 문자들.
-# ESC(\x1b)는 넣지 않는다: ANSI 시퀀스의 시작이라 시퀀스 중간에 끼면 의미가 바뀐다 (ANSI 제거 명세 이후).
-INVISIBLE = ["\u200b", "\ufeff", "\x00", "\x01", "\x07", "\x7f"]
+# ESC(\x1b)·BEL(\x07)은 넣지 않는다: 터미널 제어 시퀀스(CSI/OSC)의 시작·끝이라 시퀀스 안에 끼면 의미가 바뀐다.
+INVISIBLE = [
+    "\u200b", "\ufeff", "\x00", "\x01", "\x7f",  # zero-width, BOM, C0 제어
+    "\x9b", "\u00ad", "\u2060",  # C1 제어, soft hyphen, word joiner
+    "\u202e", "\u2066", "\u2069",  # 방향 제어
+    "\u3164", "\u2800",  # 한글 채움, 점자 빈칸
+    "\U000e0041", "\U000e0069",  # 태그 문자 (BASES에 지역 깃발이 없으므로 안전)
+]
 NON_TEXT = [None, 0, 3.14, True, [], {}, ["안녕"]]
 
 
@@ -80,6 +86,19 @@ def special_spaces(rng, s):
     return "".join(rng.choice(SPECIAL_SPACES) if ch == " " and rng.random() < 0.6 else ch for ch in s)
 
 
+def osc_link(rng, s):
+    """일부 구간을 터미널 하이퍼링크(OSC 8)로 감싼다. 정규화 후에는 링크 표시가 통째로 사라져야 한다."""
+    a = rng.randint(0, len(s))
+    b = rng.randint(a, len(s))
+    end = rng.choice(["\x07", "\x1b\\"])
+    return s[:a] + "\x1b]8;;https://example.com" + end + s[a:b] + "\x1b]8;;" + end + s[b:]
+
+
+def unicode_line_breaks(rng, s):
+    """\n을 유니코드 줄 구분자(\u2028, \u2029, NEL)로 바꾼다. 정규화 후에는 다시 \n이어야 한다."""
+    return "".join(rng.choice(["\u2028", "\u2029", "\x85"]) if ch == "\n" else ch for ch in s)
+
+
 def ansi_wrap(rng, s):
     """임의 위치에 ANSI 색상·커서 제어 시퀀스를 끼워 넣는다. 정규화 후에는 통째로 사라져야 한다."""
     chars = list(s)
@@ -96,6 +115,8 @@ NOISES = {
     "nfd": to_nfd,
     "special-spaces": special_spaces,
     "ansi": ansi_wrap,
+    "osc-link": osc_link,
+    "unicode-line-breaks": unicode_line_breaks,
 }
 
 
@@ -107,8 +128,13 @@ def make_accept(rng, i, seed):
         base = rng.choice(BASES)
         tags = []
     names = rng.sample(sorted(NOISES), k=rng.randint(1, 3))
-    if "crlf" in names and "cr" in names:
-        names.remove("cr")
+    # 줄바꿈을 바꾸는 노이즈끼리는 하나만 고른다 (예: \r\n의 \n을 \u2028로 바꾸면 줄바꿈 두 개가 맞다)
+    line_noises = [n for n in names if n in ("crlf", "cr", "unicode-line-breaks")]
+    for extra in line_noises[1:]:
+        names.remove(extra)
+    # 제어 시퀀스 노이즈끼리도 하나만 (서로의 시퀀스 한가운데에 끼어드는 입력은 실제로 나오지 않는다)
+    if "ansi" in names and "osc-link" in names:
+        names.remove("osc-link")
     # 노이즈 적용 순서도 무작위. 순서에 따라 결과가 달라지면 그게 발견이다.
     raw = base
     for name in names:
