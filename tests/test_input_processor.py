@@ -7,6 +7,38 @@ from chatbot.input_processor import MAX_LENGTH, ErrorCode, process
 
 LOGGER_NAME = "chatbot.input_processor"
 
+SECRET = "hunter2"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        f"내 비밀번호는 {SECRET}" + "a" * MAX_LENGTH,  # TOO_LONG
+        f"{SECRET}\udcff",  # INVALID_ENCODING (lone surrogate)
+        SECRET.encode() + b"\xff",  # INVALID_ENCODING (UTF-8 아닌 bytes)
+        [SECRET],  # INVALID_TYPE
+    ],
+    ids=["too-long", "surrogate", "invalid-bytes", "non-text"],
+)
+def test_rejected_input_content_is_never_logged(caplog, raw):
+    caplog.set_level(logging.DEBUG)  # 모든 로거, 모든 레벨
+
+    process(raw)
+
+    assert SECRET not in caplog.text
+    for record in caplog.records:
+        assert SECRET not in str(vars(record))
+
+
+def test_accepted_input_content_is_never_logged(caplog):
+    caplog.set_level(logging.DEBUG)
+
+    process(f"내 비밀번호는 {SECRET}")
+
+    assert SECRET not in caplog.text
+    for record in caplog.records:
+        assert SECRET not in str(vars(record))
+
 
 def test_rejection_log_for_non_text_input_has_no_length(caplog):
     caplog.set_level(logging.INFO, logger=LOGGER_NAME)
