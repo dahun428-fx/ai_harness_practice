@@ -25,6 +25,11 @@ def process(raw) -> ProcessResult:
         except UnicodeDecodeError:
             return ProcessResult(ok=False, text=None, error=ErrorCode.INVALID_ENCODING)
 
+    try:
+        raw.encode("utf-8")
+    except UnicodeEncodeError:
+        return ProcessResult(ok=False, text=None, error=ErrorCode.INVALID_ENCODING)
+
     text = raw.strip()
     if not text:
         return ProcessResult(ok=False, text=None, error=ErrorCode.EMPTY)

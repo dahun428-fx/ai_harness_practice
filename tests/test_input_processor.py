@@ -87,3 +87,27 @@ def test_non_utf8_bytes_are_rejected_as_invalid_encoding(raw):
     assert result.ok is False
     assert result.error is ErrorCode.INVALID_ENCODING
     assert result.text is None
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "\udcec\udc95\udc88",  # '안'이 surrogateescape된 형태
+        "안녕\udcff",  # 정상 텍스트 뒤에 섞인 경우
+        "\ud83d",  # 짝 없는 high surrogate (이모지가 잘린 흔적)
+    ],
+    ids=["surrogate-escaped-korean", "trailing-surrogate", "lone-high-surrogate"],
+)
+def test_str_with_lone_surrogates_is_rejected_as_invalid_encoding(raw):
+    result = process(raw)
+
+    assert result.ok is False
+    assert result.error is ErrorCode.INVALID_ENCODING
+    assert result.text is None
+
+
+def test_emoji_is_accepted():
+    result = process("안녕😊")
+
+    assert result.ok is True
+    assert result.text == "안녕😊"
