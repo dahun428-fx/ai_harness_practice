@@ -64,5 +64,7 @@ def _ensure_not_empty(text: str):
         raise _Rejected(ErrorCode.EMPTY)
 
 
-def _normalize(text) -> str:
+def _normalize(text: str) -> str:
+
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
     return unicodedata.normalize("NFC", text)

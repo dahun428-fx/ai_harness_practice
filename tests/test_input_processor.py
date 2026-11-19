@@ -134,3 +134,20 @@ def test_compatibility_characters_are_preserved(raw):
 
     assert result.ok is True
     assert result.text == raw
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("첫줄\r\n둘째줄", "첫줄\n둘째줄"),
+        ("첫줄\r둘째줄", "첫줄\n둘째줄"),
+        ("첫줄\r\n\r\n셋째줄", "첫줄\n\n셋째줄"),
+        ("a\r\nb\rc\nd", "a\nb\nc\nd"),
+    ],
+    ids=["crlf", "cr", "blank-line-crlf", "mixed"],
+)
+def test_line_endings_are_normalized_to_lf(raw, expected):
+    result = process(raw)
+
+    assert result.ok is True
+    assert result.text == expected
