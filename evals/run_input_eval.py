@@ -172,11 +172,17 @@ def tag_table(records: list[dict]) -> list[str]:
     for r in records:
         for t in r["tags"] or ["(없음)"]:
             by_tag[t][r["status"]] += 1
-    rows = [f"  {'태그':<22}{'전체':>5}{'PASS':>6}{'FAIL':>6}{'REVIEW':>8}{'ERROR':>7}   정확도"]
-    for tag, c in sorted(by_tag.items(), key=lambda kv: (-(kv[1]['FAIL'] + kv[1]['ERROR']), kv[0])):
+    rows = [f"  {'태그':<22}{'전체':>5}{'PASS':>6}{'FAIL':>6}{'REVIEW':>8}{'ERROR':>7}   정확도 (REVIEW 제외)"]
+
+    def problems_first(item):
+        _, c = item
+        return (-(c["FAIL"] + c["ERROR"]), -c["REVIEW"], item[0])
+
+    for tag, c in sorted(by_tag.items(), key=problems_first):
         total = sum(c.values())
-        rows.append(f"  {tag:<22}{total:>5}{c['PASS']:>6}{c['FAIL']:>6}{c['REVIEW']:>8}{c['ERROR']:>7}"
-                    f"   {c['PASS'] / total:6.1%}")
+        judged = total - c["REVIEW"]  # REVIEW는 정답이 아직 정해지지 않은 케이스라 분모에서 뺀다
+        accuracy = f"{c['PASS'] / judged:6.1%}" if judged else "     -  (판단 대기)"
+        rows.append(f"  {tag:<22}{total:>5}{c['PASS']:>6}{c['FAIL']:>6}{c['REVIEW']:>8}{c['ERROR']:>7}   {accuracy}")
     return rows
 
 
