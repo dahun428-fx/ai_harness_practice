@@ -1,4 +1,5 @@
 import pytest
+import unicodedata
 from chatbot.input_processor import ErrorCode, process
 
 
@@ -111,3 +112,25 @@ def test_emoji_is_accepted():
 
     assert result.ok is True
     assert result.text == "안녕😊"
+
+
+def test_decomposed_korean_is_normalized_to_nfc():
+    nfd = unicodedata.normalize("NFD", "안녕")
+    assert nfd != "안녕"  # 전제 조건: 입력이 정말 NFD인지
+
+    result = process(nfd)
+
+    assert result.ok is True
+    assert result.text == "안녕"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["①", "Ａ", "ﬁ", "㎏"],
+    ids=["circled-digit", "fullwidth-latin", "ligature", "unit-symbol"],
+)
+def test_compatibility_characters_are_preserved(raw):
+    result = process(raw)
+
+    assert result.ok is True
+    assert result.text == raw

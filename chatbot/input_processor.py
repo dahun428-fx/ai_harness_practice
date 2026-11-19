@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum
+import unicodedata
 
 
 class ErrorCode(Enum):
@@ -27,6 +28,7 @@ def process(raw) -> ProcessResult:
     try:
         text = _decode(raw)
         _ensure_utf8_encodable(text)
+        text = _normalize(text)
         text = text.strip()
         _ensure_not_empty(text)
     except _Rejected as e:
@@ -60,3 +62,7 @@ def _ensure_utf8_encodable(text: str):
 def _ensure_not_empty(text: str):
     if not text:
         raise _Rejected(ErrorCode.EMPTY)
+
+
+def _normalize(text) -> str:
+    return unicodedata.normalize("NFC", text)
