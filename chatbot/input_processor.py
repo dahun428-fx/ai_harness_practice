@@ -14,23 +14,49 @@ class ProcessResult:
     text: str | None = None
     error: ErrorCode | None = None
 
+    @classmethod
+    def accept(cls, text: str) -> "ProcessResult":
+        return cls(ok=True, text=text)
+
+    @classmethod
+    def reject(cls, error: ErrorCode) -> "ProcessResult":
+        return cls(ok=False, text=None, error=error)
+
 
 def process(raw) -> ProcessResult:
-    if not isinstance(raw, (str, bytes)):
-        return ProcessResult(ok=False, text=None, error=ErrorCode.INVALID_TYPE)
+    try:
+        text = _decode(raw)
+        _ensure_utf8_encodable(text)
+        text = text.strip()
+        _ensure_not_empty(text)
+    except _Rejected as e:
+        return ProcessResult.reject(e.error)
+    return ProcessResult.accept(text)
 
+
+class _Rejected(Exception):
+    def __init__(self, error: ErrorCode):
+        self.error = error
+
+
+def _decode(raw) -> str:
+    if isinstance(raw, str):
+        return raw
     if isinstance(raw, bytes):
         try:
-            raw = raw.decode("utf-8")
+            return raw.decode("utf-8")
         except UnicodeDecodeError:
-            return ProcessResult(ok=False, text=None, error=ErrorCode.INVALID_ENCODING)
+            raise _Rejected(ErrorCode.INVALID_ENCODING) from None
+    raise _Rejected(ErrorCode.INVALID_TYPE)
 
+
+def _ensure_utf8_encodable(text: str):
     try:
-        raw.encode("utf-8")
+        text.encode("utf-8")
     except UnicodeEncodeError:
-        return ProcessResult(ok=False, text=None, error=ErrorCode.INVALID_ENCODING)
+        raise _Rejected(ErrorCode.INVALID_ENCODING)
 
-    text = raw.strip()
+
+def _ensure_not_empty(text: str):
     if not text:
-        return ProcessResult(ok=False, text=None, error=ErrorCode.EMPTY)
-    return ProcessResult(ok=True, text=text)
+        raise _Rejected(ErrorCode.EMPTY)
