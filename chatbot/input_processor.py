@@ -2,11 +2,14 @@ from dataclasses import dataclass
 from enum import Enum
 import unicodedata
 
+MAX_LENGTH = 4000
+
 
 class ErrorCode(Enum):
     EMPTY = "EMPTY"
     INVALID_TYPE = "INVALID_TYPE"
     INVALID_ENCODING = "INVALID_ENCODING"
+    TOO_LONG = "TOO_LONG"
 
 
 @dataclass(frozen=True)
@@ -31,6 +34,7 @@ def process(raw) -> ProcessResult:
         text = _normalize(text)
         text = text.strip()
         _ensure_not_empty(text)
+        _ensure_within_max_length(text)
     except _Rejected as e:
         return ProcessResult.reject(e.error)
     return ProcessResult.accept(text)
@@ -69,6 +73,11 @@ def _normalize(text: str) -> str:
     text = unicodedata.normalize("NFC", text)
     text = text.translate(_REMOVE_INVISIBLE)
     return text
+
+
+def _ensure_within_max_length(text: str):
+    if len(text) > MAX_LENGTH:
+        raise _Rejected(ErrorCode.TOO_LONG)
 
 
 _INVISIBLE_CHARS = {

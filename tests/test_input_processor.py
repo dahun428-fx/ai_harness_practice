@@ -1,6 +1,6 @@
 import pytest
 import unicodedata
-from chatbot.input_processor import ErrorCode, process
+from chatbot.input_processor import MAX_LENGTH, ErrorCode, process
 
 
 def test_plain_text_is_accepted_as_is():
@@ -209,3 +209,45 @@ def test_only_invisible_characters_is_rejected_as_empty(raw):
 
     assert result.ok is False
     assert result.error is ErrorCode.EMPTY
+
+
+def test_max_length_matches_spec():
+    assert MAX_LENGTH == 4000
+
+
+def test_input_at_max_length_is_accepted():
+    result = process("a" * MAX_LENGTH)
+
+    assert result.ok is True
+
+
+def test_input_over_max_length_is_rejected_as_too_long():
+    result = process("a" * (MAX_LENGTH + 1))
+
+    assert result.ok is False
+    assert result.error is ErrorCode.TOO_LONG
+    assert result.text is None
+
+
+def test_length_counts_characters_not_bytes():
+    result = process("가" * MAX_LENGTH)  # UTF-8로는 12000바이트
+
+    assert result.ok is True
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "   " + "a" * MAX_LENGTH + "   ",
+        "\u200b" * 10 + "a" * MAX_LENGTH,
+        unicodedata.normalize("NFD", "가" * MAX_LENGTH),  # 정규화 전 8000자
+        "a" * (MAX_LENGTH - 2)
+        + "\r\n"
+        + "b",  # 정규화 후 a 3998 + \n + b = 4000자 (정규화 전 4001자)
+    ],
+    ids=["surrounding-spaces", "zero-width-padding", "nfd-korean", "crlf"],
+)
+def test_length_is_measured_after_normalization(raw):
+    result = process(raw)
+
+    assert result.ok is True
