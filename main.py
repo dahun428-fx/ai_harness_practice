@@ -16,13 +16,14 @@ from claude_agent_sdk import (
 from chatbot.input_processor import process
 from chatbot.logging_config import set_session_id, setup_logging
 from chatbot.messages import REJECTION_MESSAGES
+from chatbot.prompt_builder import PromptSpec, TemplateError, load_prompt_spec, render_template
 from chatbot.tracing import TraceWriter, app_version, new_session_id, prompt_version
 
 ROOT = Path(__file__).parent
 LOG_FILE = ROOT / "logs" / "chatbot.log"
 TRACE_DIR = ROOT / "traces"
+PROMPT_FILE = ROOT / "prompts" / "chat.yaml"
 EXIT_COMMANDS = ("exit", "quit")
-SYSTEM_PROMPT = "너는 친절한 한국어 비서야"
 
 logger = logging.getLogger("chatbot.main")
 
@@ -68,16 +69,16 @@ async def ask(client: ClaudeSDKClient, text: str) -> dict:
     return {"text": "".join(parts), "model": model, **outcome}
 
 
-async def main(tracer: TraceWriter, session_id: str) -> None:
+async def main(tracer: TraceWriter, session_id: str, spec: PromptSpec, system_prompt: str) -> None:
     options = ClaudeAgentOptions(
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         tools=[],
         setting_sources=[],  # CLAUDE.md 등 프로젝트 설정을 읽지 않음
     )
-    version = {**app_version(ROOT), "prompt_version": prompt_version(SYSTEM_PROMPT)}
+    version = {**app_version(ROOT), "prompt_id": spec.id, "prompt_version": prompt_version(system_prompt)}
 
     logger.info("session started", extra=version)
-    tracer.write({"type": "session_start", "session_id": session_id, **version, "system_prompt": SYSTEM_PROMPT})
+    tracer.write({"type": "session_start", "session_id": session_id, **version, "system_prompt": system_prompt})
 
     turn = 0
     async with ClaudeSDKClient(options=options) as client:
@@ -128,6 +129,14 @@ if __name__ == "__main__":
     # 루트까지 DEBUG로 내리면 SDK 등 외부 라이브러리의 DEBUG 로그(대화 내용이 들어갈 수 있음)까지 파일에 남는다.
     logging.getLogger("chatbot").setLevel(os.environ.get("LOG_LEVEL", "INFO").upper())
 
+    # 프롬프트 파일은 SDK 연결 전에 읽는다. 잘못된 파일이면 대화가 시작되기 전에 실패한다.
+    try:
+        spec = load_prompt_spec(PROMPT_FILE)
+        system_prompt = render_template(spec.system, {})
+    except TemplateError:
+        logger.exception("invalid prompt file", extra={"path": str(PROMPT_FILE)})
+        raise
+
     # 트레이스(원문 포함)는 기본으로 켜고, TRACE=0 이면 끈다. 보관 기간이 지난 파일은 시작할 때 지운다.
     tracer = TraceWriter(TRACE_DIR, enabled=os.environ.get("TRACE", "1") != "0")
     tracer.cleanup(retention_days=int(os.environ.get("TRACE_RETENTION_DAYS", "30")))
@@ -135,7 +144,7 @@ if __name__ == "__main__":
     session_id = new_session_id()
     set_session_id(session_id)
     try:
-        anyio.run(main, tracer, session_id)
+        anyio.run(main, tracer, session_id, spec, system_prompt)
     except KeyboardInterrupt:  # 답변이 출력되는 도중에 Ctrl+C를 누른 경우
         print()
     except Exception:

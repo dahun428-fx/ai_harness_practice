@@ -1,0 +1,5 @@
+id: chat
+description: 기본 한국어 대화 비서
+variables: []
+system: |
+  너는 친절한 한국어 비서야
