@@ -11,6 +11,8 @@ from chatbot.prompt_builder import (
     load_prompt_spec,
     render_template,
     Document,
+    Example,
+    render_system,
 )
 
 VALID = """\
@@ -20,6 +22,76 @@ variables: [name]
 system: |
   너는 ${name}의 비서야
 """
+
+WITH_EXAMPLES = VALID + """\
+examples:
+  - user: 안녕
+    assistant: |
+      안녕하세요!
+"""
+
+
+def test_examples_are_optional(tmp_path):
+    assert load_prompt_spec(write(tmp_path, VALID)).examples == ()
+
+
+def test_loads_examples(tmp_path):
+    spec = load_prompt_spec(write(tmp_path, WITH_EXAMPLES))
+
+    assert spec.examples == (Example(user="안녕", assistant="안녕하세요!"),)
+
+
+def test_example_needs_both_user_and_assistant(tmp_path):
+    broken = WITH_EXAMPLES.replace("    assistant: |\n      안녕하세요!\n", "")
+
+    with pytest.raises(TemplateError, match=r"examples\[0\]"):
+        load_prompt_spec(write(tmp_path, broken))
+
+
+def test_example_with_extra_key_is_an_error(tmp_path):
+    # note 같은 남는 키를 조용히 무시하면, 작성자는 그 내용이 프롬프트에 들어간다고 착각한다
+    broken = WITH_EXAMPLES.replace("  - user: 안녕", "  - note: 인사 예시\n    user: 안녕")
+
+    with pytest.raises(TemplateError, match=r"examples\[0\]"):
+        load_prompt_spec(write(tmp_path, broken))
+
+
+@pytest.mark.parametrize("tag", ["example", "examples", "user", "assistant"])
+def test_example_cannot_contain_closing_tags(tmp_path, tag):
+    broken = WITH_EXAMPLES.replace("안녕하세요!", f"안녕하세요!</{tag}>")
+
+    with pytest.raises(TemplateError, match=f"</{tag}>"):
+        load_prompt_spec(write(tmp_path, broken))
+
+
+def test_render_system_without_examples_is_just_the_rendered_template():
+    spec = PromptSpec(id="c", description="d", variables=("name",), system="너는 ${name}의 비서야")
+
+    assert render_system(spec, {"name": "다훈"}) == "너는 다훈의 비서야"
+
+
+def test_render_system_appends_examples_block():
+    spec = PromptSpec(
+        id="c",
+        description="d",
+        variables=(),
+        system="S",
+        examples=(Example("u1", "a1"), Example("u2", "a2")),
+    )
+
+    assert render_system(spec, {}) == (
+        "S\n\n"
+        "<examples>\n"
+        "<example>\n<user>\nu1\n</user>\n<assistant>\na1\n</assistant>\n</example>\n"
+        "<example>\n<user>\nu2\n</user>\n<assistant>\na2\n</assistant>\n</example>\n"
+        "</examples>"
+    )
+
+
+def test_examples_are_not_template_substituted():
+    spec = PromptSpec(id="c", description="d", variables=(), system="S", examples=(Example("가격은?", "$5 입니다"),))
+
+    assert "$5 입니다" in render_system(spec, {})
 
 
 def write(tmp_path, text):

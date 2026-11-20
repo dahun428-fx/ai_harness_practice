@@ -1,9 +1,12 @@
 """프롬프트 구성기.
 
-시스템 지시, 대화 기록, 사용자 입력을 조합해 LLM에 전달할 최종 입력(Prompt)을 만든다.
+시스템 지시, 예시, 외부 문서, 대화 기록, 사용자 입력을 조합해 LLM에 전달할 최종 입력(Prompt)을 만든다.
 - 순수 함수로만 구성한다(파일 읽기는 load_prompt_spec 한 곳). 같은 입력이면 항상 같은 출력이 나와야
   스냅샷 테스트와 프롬프트 캐싱이 가능하다.
 - 결과는 특정 SDK에 묶이지 않은 중립 형태(Prompt)다. SDK 호출 형태로 바꾸는 일은 어댑터가 맡는다.
+- 신뢰 수준에 따라 자리가 다르다.
+    system   : 우리가 쓴 것(prompts/*.yaml의 지시와 예시). 신뢰한다.
+    messages : 사용자 입력과 외부 문서. 신뢰하지 않는다. 절대 system에 넣지 않는다.
 """
 
 # Sequence: list, tuple 등 "순서가 있고 인덱스로 접근할 수 있는 것"을 모두 받는 추상 타입
@@ -21,11 +24,12 @@ from string import Template
 # Literal: 값이 정해진 몇 개 중 하나라는 걸 타입 힌트로 표현 (role은 "user" 또는 "assistant"만)
 from typing import Literal
 
-
+# escape: & < > 를 &amp; &lt; &gt; 로 바꾸는 XML 이스케이프. 두 번째 인자로 추가 치환 규칙을 줄 수 있다.
 from xml.sax.saxutils import escape
 
 # PyYAML: 프롬프트 파일(prompts/*.yaml)을 읽는 데 쓰는 외부 라이브러리
 import yaml
+
 
 # ---------------------------------------------------------------------------
 # 예외
@@ -63,10 +67,28 @@ class Message:
 class Prompt:
     # 시스템 지시. 사용자 입력은 절대 여기에 들어가지 않는다(역할 경계).
     system: str
-    # 대화 기록 + 현재 사용자 입력. list가 아니라 tuple이라 불변이고, == 비교로 결정성을 검사할 수 있다.
+    # 대화 기록 + 이번 턴의 user 메시지. list가 아니라 tuple이라 불변이고, == 비교로 결정성을 검사할 수 있다.
     messages: tuple[Message, ...]
     # 예산 때문에 버린 대화 턴(user+assistant 쌍)의 수. 기본값 0이라 기존 호출은 그대로 동작한다.
     dropped_turns: int = 0
+
+
+# 외부 문서(검색 결과, 파일 내용 등). 우리가 쓰지 않은, 신뢰하지 않는 텍스트다.
+@dataclass(frozen=True)
+class Document:
+    # 출처 (파일 이름, URL 등). <document source="..."> 속성으로 들어간다.
+    source: str
+    # 본문. 이스케이프된 뒤 <document> 블록 안에 들어간다.
+    content: str
+
+
+# few-shot 예시 한 쌍. prompts/*.yaml의 examples 항목 하나에 해당한다. 우리가 쓴, 신뢰하는 텍스트다.
+@dataclass(frozen=True)
+class Example:
+    # 예시 질문
+    user: str
+    # 예시 답변 (모델이 따라 했으면 하는 형식과 말투)
+    assistant: str
 
 
 # 프롬프트 파일(YAML) 한 개의 내용.
@@ -80,21 +102,83 @@ class PromptSpec:
     variables: tuple[str, ...]
     # 시스템 지시 템플릿 (아직 변수가 치환되지 않은 원본)
     system: str
-
-
-@dataclass(frozen=True)
-class Document:
-    source: str
-    content: str
-
-
-# 프롬프트 파일에 반드시 있어야 하는 키와 각 값의 타입.
-# 이 dict 하나가 "필수 키 목록", "허용 키 목록", "타입 규칙" 세 가지 역할을 한다.
-_SPEC_FIELDS = {"id": str, "description": str, "variables": list, "system": str}
+    # 예시 목록. 선택 항목이라 기본값이 빈 tuple이고, 예시가 없으면 system은 예전과 바이트 단위로 같다.
+    examples: tuple[Example, ...] = ()
 
 
 # ---------------------------------------------------------------------------
-# 프롬프트 조립
+# 상수
+# ---------------------------------------------------------------------------
+
+# 프롬프트 파일에 반드시 있어야 하는 키와 각 값의 타입
+_REQUIRED_FIELDS = {"id": str, "description": str, "variables": list, "system": str}
+# 있어도 되고 없어도 되는 키와 각 값의 타입. 필수 + 선택 = 허용되는 키 전체(나머지는 오타로 보고 거부).
+_OPTIONAL_FIELDS = {"examples": list}
+# 예시 블록에 쓰는 태그. 예시 본문에 이 닫는 태그가 있으면 블록 구조가 깨지므로 로딩할 때 거부한다.
+# "</examples>"는 "</example>"을 부분 문자열로 포함하지 않으므로(s> 와 >) 순서는 상관없다.
+_EXAMPLE_TAGS = ("examples", "example", "user", "assistant")
+
+
+# ---------------------------------------------------------------------------
+# 시스템 지시 렌더링 (템플릿 + 예시)
+# ---------------------------------------------------------------------------
+
+
+def render_template(text: str, variables: dict[str, str]) -> str:
+    """템플릿의 $name / ${name} 자리를 variables 값으로 한 번만 치환한다."""
+    # 문자열을 템플릿 객체로 만든다
+    template = Template(text)
+    # 템플릿이 실제로 쓰는 변수 이름들. get_identifiers()는 Python 3.11+에서 쓸 수 있다.
+    # $1처럼 잘못된 자리표시는 여기서 조용히 빠지고, 아래 substitute()에서 ValueError로 잡힌다.
+    expected = set(template.get_identifiers())
+
+    # 템플릿에는 있는데 값을 안 넘긴 변수. 그대로 두면 "$name"이 모델에 그대로 전달된다.
+    missing = expected - variables.keys()
+    if missing:
+        # sorted: set의 순서는 실행마다 다를 수 있으므로 정렬해서 메시지를 결정적으로 만든다
+        raise TemplateError(f"Missing variables: {', '.join(sorted(missing))}")
+    # 값은 넘겼는데 템플릿이 쓰지 않는 변수. 호출 쪽 오타(nmae)나 템플릿에서 변수를 지운 뒤의 드리프트를 잡는다.
+    unused = variables.keys() - expected
+    if unused:
+        raise TemplateError(f"Unused variables: {', '.join(sorted(unused))}")
+
+    try:
+        # 치환은 한 번만 일어난다. 값 안에 "$b"가 있어도 다시 치환되지 않는다 → 변수끼리 값이 새지 않는다.
+        # "$$"는 문자 "$" 하나가 된다.
+        return template.substitute(variables)
+    except ValueError as e:
+        # "$1", "100$ 할인"처럼 자리표시 문법이 틀린 경우. from e로 원래 예외를 이어 붙여 원인 추적을 돕는다.
+        raise TemplateError(f"Template substitution error: {e}") from e
+
+
+def _render_examples(examples: Sequence[Example]) -> str:
+    """예시들을 <examples> 블록으로 만든다. 예시가 없으면 빈 문자열(→ system은 템플릿 결과와 동일)."""
+    # 예시가 없으면 구분용 빈 줄도 붙이지 않는다. 그래야 기존 프롬프트와 해시(prompt_version)가 같다.
+    if not examples:
+        return ""
+    # 여는 태그부터 시작해 예시를 하나씩 덧붙인다
+    parts = ["<examples>"]
+    for example in examples:
+        # 예시는 우리가 쓴 텍스트라 이스케이프하지 않는다(HTML 예시 등이 망가지지 않게).
+        # 구조를 깨는 닫는 태그는 _parse_examples가 로딩 시점에 이미 막았다.
+        parts.append(
+            f"<example>\n<user>\n{example.user}\n</user>\n<assistant>\n{example.assistant}\n</assistant>\n</example>"
+        )
+    # 닫는 태그
+    parts.append("</examples>")
+    # 템플릿 본문과 빈 줄 하나로 구분한다. 구분자를 여기서 붙여야 예시가 없을 때 빈 줄이 생기지 않는다.
+    return "\n\n" + "\n".join(parts)
+
+
+def render_system(spec: PromptSpec, variables: dict[str, str]) -> str:
+    """프롬프트 파일 내용으로 최종 시스템 지시를 만든다 = 템플릿 치환 결과 + 예시 블록."""
+    # 템플릿을 먼저 치환하고, 예시 블록은 그 뒤에 붙인다.
+    # 순서를 바꿔 통째로 치환하면 예시 안의 "$5" 같은 글자가 잘못된 자리표시로 오류를 낸다.
+    return render_template(spec.system, variables) + _render_examples(spec.examples)
+
+
+# ---------------------------------------------------------------------------
+# 프롬프트 조립 (system + 대화 기록 + 문서 + 사용자 입력)
 # ---------------------------------------------------------------------------
 
 
@@ -123,15 +207,22 @@ def _check_alternation(history: Sequence[Message]) -> None:
 
 def _render_documents(documents: Sequence[Document]) -> str:
     """문서들을 <documents> 블록으로 감싼다. 문서가 없으면 빈 문자열(→ user 메시지는 기존과 동일)."""
+    # 문서가 없으면 아무것도 붙이지 않는다(질문 앞에 빈 줄도 생기지 않게)
     if not documents:
         return ""
+    # 여는 태그부터 시작해 문서를 하나씩 덧붙인다
     parts = ["<documents>"]
+    # start=1: 사람이 "1번 문서"라고 부르기 쉽게 1부터 번호를 매긴다
     for index, document in enumerate(documents, start=1):
-        # 속성값은 큰따옴표로 감싸므로 " 도 이스케이프해야 속성을 위조할 수 없다
+        # 속성값은 큰따옴표로 감싸므로 " 도 이스케이프해야 속성을 위조할 수 없다.
+        # escape()는 기본적으로 & < > 만 바꾸고 " 는 그대로 두기 때문에 추가 규칙으로 넘긴다.
         source = escape(document.source, {'"': "&quot;"})
-        # 본문의 </documents> 같은 태그가 블록을 닫지 못하게 < > & 를 이스케이프한다
+        # 본문의 </documents> 같은 태그가 블록을 닫지 못하게 & < > 를 이스케이프한다.
+        # 문서는 신뢰하지 않는 외부 텍스트라, 내용을 변형해서라도 블록 밖으로 못 나가게 막는다.
         parts.append(f'<document index="{index}" source="{source}">\n{escape(document.content)}\n</document>')
+    # 닫는 태그
     parts.append("</documents>")
+    # 각 부분을 줄바꿈으로 잇고, 뒤에 오는 질문과 빈 줄 하나로 구분한다
     return "\n".join(parts) + "\n\n"
 
 
@@ -142,10 +233,10 @@ def build_prompt(
     documents: Sequence[Document] = (),
     max_chars: int | None = None,
 ) -> Prompt:
-    """시스템 지시 + 대화 기록 + 현재 입력으로 Prompt를 만든다.
+    """시스템 지시 + 대화 기록 + 문서 + 현재 입력으로 Prompt를 만든다.
 
     max_chars가 주어지면 system을 포함한 전체 글자 수가 그 이하가 되도록 가장 오래된 턴부터 버린다.
-    현재 입력은 절대 버리지 않는다.
+    현재 입력과 문서는 절대 버리지 않는다.
     """
     # 교대 검사는 예산 처리보다 먼저 한다. 잘못된 기록을 먼저 자르면 문제가 우연히 가려질 수 있다.
     _check_alternation(history)
@@ -184,35 +275,40 @@ def build_prompt(
 
 
 # ---------------------------------------------------------------------------
-# 템플릿
+# 프롬프트 파일 읽기 (prompts/*.yaml)
 # ---------------------------------------------------------------------------
 
 
-def render_template(text: str, variables: dict[str, str]) -> str:
-    """템플릿의 $name / ${name} 자리를 variables 값으로 한 번만 치환한다."""
-    # 문자열을 템플릿 객체로 만든다
-    template = Template(text)
-    # 템플릿이 실제로 쓰는 변수 이름들. get_identifiers()는 Python 3.11+에서 쓸 수 있다.
-    # $1처럼 잘못된 자리표시는 여기서 조용히 빠지고, 아래 substitute()에서 ValueError로 잡힌다.
-    expected = set(template.get_identifiers())
+def _check_example_text(where: str, value: object) -> None:
+    """예시의 user/assistant 값 하나를 검사한다. where는 오류 메시지 앞머리(예: 'chat.yaml: examples[0].user')."""
+    # 값은 문자열이어야 한다 (YAML의 no → False 같은 변환을 막는다)
+    if not isinstance(value, str):
+        raise TemplateError(f"{where}: must be a string, got {type(value).__name__}")
+    # 우리 블록 태그의 닫는 태그가 들어 있으면 예시 블록이 중간에 닫혀 버린다.
+    # 예시는 이스케이프하지 않는 대신, 이런 실수를 앱 시작 시점에 알려 준다.
+    for tag in _EXAMPLE_TAGS:
+        if f"</{tag}>" in value:
+            raise TemplateError(f"{where}: must not contain </{tag}>")
 
-    # 템플릿에는 있는데 값을 안 넘긴 변수. 그대로 두면 "$name"이 모델에 그대로 전달된다.
-    missing = expected - variables.keys()
-    if missing:
-        # sorted: set의 순서는 실행마다 다를 수 있으므로 정렬해서 메시지를 결정적으로 만든다
-        raise TemplateError(f"Missing variables: {', '.join(sorted(missing))}")
-    # 값은 넘겼는데 템플릿이 쓰지 않는 변수. 호출 쪽 오타(nmae)나 템플릿에서 변수를 지운 뒤의 드리프트를 잡는다.
-    unused = variables.keys() - expected
-    if unused:
-        raise TemplateError(f"Unused variables: {', '.join(sorted(unused))}")
 
-    try:
-        # 치환은 한 번만 일어난다. 값 안에 "$b"가 있어도 다시 치환되지 않는다 → 변수끼리 값이 새지 않는다.
-        # "$$"는 문자 "$" 하나가 된다.
-        return template.substitute(variables)
-    except ValueError as e:
-        # "$1", "100$ 할인"처럼 자리표시 문법이 틀린 경우. from e로 원래 예외를 이어 붙여 원인 추적을 돕는다.
-        raise TemplateError(f"Template substitution error: {e}") from e
+def _parse_examples(path: str | Path, raw: list) -> tuple[Example, ...]:
+    """YAML의 examples 리스트를 검증해 Example tuple로 바꾼다. 문제가 있으면 위치(examples[i])를 담아 TemplateError."""
+    # 검증을 통과한 예시를 모은다
+    examples = []
+    for i, item in enumerate(raw):
+        # 오류 메시지 앞머리. 예시가 여러 개일 때 몇 번째가 문제인지 바로 찾을 수 있게 한다.
+        where = f"{path}: examples[{i}]"
+        # 각 항목은 키가 정확히 user, assistant 두 개인 dict여야 한다.
+        # dict의 keys()는 set과 바로 비교할 수 있어서, 이 한 줄로 누락(assistant 없음)·오타(asistant)·남는 키(note)를 모두 잡는다.
+        if not isinstance(item, dict) or item.keys() != {"user", "assistant"}:
+            raise TemplateError(f"{where}: must have exactly the keys 'user' and 'assistant'")
+        # user, assistant 값을 각각 검사한다 (타입, 금지된 닫는 태그)
+        for key in ("user", "assistant"):
+            _check_example_text(f"{where}.{key}", item[key])
+        # YAML의 | 블록은 끝에 줄바꿈을 남기므로 끝 공백을 지운 뒤 저장한다
+        examples.append(Example(user=item["user"].rstrip(), assistant=item["assistant"].rstrip()))
+    # 불변 tuple로 돌려준다
+    return tuple(examples)
 
 
 def load_prompt_spec(path: str | Path) -> PromptSpec:
@@ -229,18 +325,20 @@ def load_prompt_spec(path: str | Path) -> PromptSpec:
         raise TemplateError(f"{path}: expected a YAML mapping, got {type(data).__name__}")
 
     # 필수 키 중 파일에 없는 것
-    missing = _SPEC_FIELDS.keys() - data.keys()
+    missing = _REQUIRED_FIELDS.keys() - data.keys()
     if missing:
         raise TemplateError(f"{path}: missing required keys: {', '.join(sorted(missing))}")
-    # 파일에 있지만 허용하지 않는 키 (sytem 같은 오타). YAML은 오타 키를 조용히 받아들이므로 직접 막는다.
+    # 필수도 선택도 아닌 키 (sytem 같은 오타). YAML은 오타 키를 조용히 받아들이므로 직접 막는다.
     # 바다코끼리 연산자(:=)로 계산과 동시에 변수에 담고, 비어 있지 않으면 오류.
-    if unknown := data.keys() - _SPEC_FIELDS.keys():
+    if unknown := data.keys() - _REQUIRED_FIELDS.keys() - _OPTIONAL_FIELDS.keys():
         # YAML 키는 문자열이 아닐 수 있다(1: x → int 키). map(str)로 바꿔야 sorted/join이 TypeError를 내지 않는다.
         raise TemplateError(f"{path}: unknown keys: {', '.join(sorted(map(str, unknown)))}")
 
     # 각 키의 값 타입 검사. YAML 1.1에서는 no → False, 1.0 → float처럼 의도와 다른 타입이 될 수 있다.
-    for key, kind in _SPEC_FIELDS.items():
-        if not isinstance(data[key], kind):
+    # | 는 두 dict를 합친다(Python 3.9+).
+    for key, kind in (_REQUIRED_FIELDS | _OPTIONAL_FIELDS).items():
+        # 선택 키는 없을 수 있으므로 "있는 키만" 검사한다. key in data 가 빠지면 examples 없는 파일이 KeyError로 죽는다.
+        if key in data and not isinstance(data[key], kind):
             raise TemplateError(f"{path}: key '{key}' must be of type {kind.__name__}, got {type(data[key]).__name__}")
     # variables는 list인 것만으로는 부족하고, 원소가 모두 문자열이어야 한다
     if not all(isinstance(v, str) for v in data["variables"]):
@@ -264,4 +362,6 @@ def load_prompt_spec(path: str | Path) -> PromptSpec:
         description=data["description"],
         variables=tuple(data["variables"]),
         system=system,
+        # examples가 없는 파일이면 빈 리스트로 검증 → 빈 tuple
+        examples=_parse_examples(path, data.get("examples", [])),
     )
