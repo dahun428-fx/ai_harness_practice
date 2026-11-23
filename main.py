@@ -43,8 +43,17 @@ from chatbot.logging_config import set_session_id, setup_logging
 # 거부 사유(ErrorCode)별 사용자 안내 문구
 from chatbot.messages import REJECTION_MESSAGES
 
-# 프롬프트 구성기: 프롬프트 파일을 읽고(load_prompt_spec) 최종 시스템 지시를 만든다(render_system)
-from chatbot.prompt_builder import PromptSpec, TemplateError, load_prompt_spec, render_system
+# 프롬프트 구성기: 프롬프트 파일을 읽고(load_prompt_spec) 최종 시스템 지시를 만든다(render_system).
+# 턴마다 최종 입력(Prompt)을 조립하고(build_prompt), 프롬프트 정의의 버전을 계산한다(spec_version).
+from chatbot.prompt_builder import (
+    Prompt,
+    PromptSpec,
+    TemplateError,
+    build_prompt,
+    load_prompt_spec,
+    render_system,
+    spec_version,
+)
 
 # 트레이스: 턴마다 원문을 기록. 버전 정보(git 커밋, 프롬프트 해시)도 함께 남긴다.
 from chatbot.tracing import TraceWriter, app_version, new_session_id, prompt_version
@@ -75,12 +84,17 @@ def read_user_input() -> str | None:
         return None
 
 
-async def ask(client: ClaudeSDKClient, text: str) -> dict:
-    """질문을 보내고 답을 화면에 출력한다. 트레이스에 남길 응답 정보를 돌려준다."""
-    # 운영 로그에는 길이만 남긴다 (원문 금지 규칙)
-    logger.debug("query sent", extra={"text_length": len(text)})
-    # 질문을 보낸다. 대화 기록은 SDK 세션이 들고 있으므로 이번 입력만 보내면 된다.
-    await client.query(text)
+async def ask(client: ClaudeSDKClient, prompt: Prompt) -> dict:
+    """조립된 프롬프트를 보내고 답을 화면에 출력한다. 트레이스에 남길 응답 정보를 돌려준다.
+
+    Prompt(중립 형태)를 Agent SDK 호출로 바꾸는 어댑터 역할이다. SDK에 맞춘 사정은 여기에만 둔다.
+    - 시스템 지시는 세션을 열 때 options.system_prompt로 이미 넘겼다.
+    - 대화 기록은 SDK 세션이 들고 있으므로 이번 턴(마지막 user 메시지)만 보낸다.
+    """
+    # 운영 로그에는 개수·크기만 남긴다 (원문 금지 규칙). metadata()는 내용을 담지 않는다.
+    logger.debug("query sent", extra=prompt.metadata())
+    # 이번 턴의 user 메시지. 문서가 있으면 <documents> 블록이 질문 앞에 붙어 있다.
+    await client.query(prompt.messages[-1].content)
     # 응답 앞머리. flush=True로 즉시 화면에 내보낸다(버퍼에 쌓이지 않게).
     print("Claude: ", end="", flush=True)
     # parts: 응답 텍스트 조각들 / model: 응답한 모델 이름 / outcome: 끝났을 때의 통계
@@ -137,8 +151,15 @@ async def main(tracer: TraceWriter, session_id: str, spec: PromptSpec, system_pr
         setting_sources=[],
     )
     # 이 세션이 어떤 코드와 어떤 프롬프트로 돌았는지. 드리프트를 추적할 때 이 값으로 구간을 나눈다.
-    # prompt_version은 렌더링된 시스템 지시의 해시라, 템플릿이나 예시가 바뀌면 값이 바뀐다.
-    version = {**app_version(ROOT), "prompt_id": spec.id, "prompt_version": prompt_version(system_prompt)}
+    # - prompt_version: 프롬프트 파일의 의미 내용(템플릿 + 예시) 해시. 변수 값·주석·설명에는 영향받지 않는다.
+    # - system_hash: 실제로 보낸 시스템 지시 텍스트의 해시. 예전 트레이스의 prompt_version과 같은 계산이라 둘을 잇는다.
+    # - 조립 규칙 코드가 바뀐 것은 git_commit으로 구분한다.
+    version = {
+        **app_version(ROOT),
+        "prompt_id": spec.id,
+        "prompt_version": spec_version(spec),
+        "system_hash": prompt_version(system_prompt),
+    }
 
     # 운영 로그에는 버전 정보만, 트레이스에는 시스템 프롬프트 원문까지 남긴다
     logger.info("session started", extra=version)
@@ -183,8 +204,12 @@ async def main(tracer: TraceWriter, session_id: str, spec: PromptSpec, system_pr
                 continue
 
             try:
+                # 이번 턴의 최종 입력을 조립한다. 대화 기록은 SDK 세션이 들고 있으므로 넘기지 않는다.
+                prompt = build_prompt(system=system_prompt, user_input=result.text)
+                # 조립 결과의 개수·크기 정보. 원문은 이미 input에 있으므로 중복해서 남기지 않는다.
+                record["prompt"] = prompt.metadata()
                 # Claude에게 묻고 응답 정보를 레코드에 담는다
-                record["output"] = await ask(client, result.text)
+                record["output"] = await ask(client, prompt)
             except ClaudeSDKError as e:
                 # SDK 오류: traceback은 운영 로그에, 오류 요약은 트레이스에 남기고 대화는 계속한다
                 logger.exception("query failed")

@@ -1,18 +1,20 @@
+import json
 from pathlib import Path
 
 import pytest
 
 from chatbot.prompt_builder import (
+    Document,
+    Example,
     Message,
     PromptBuildError,
     PromptSpec,
     TemplateError,
     build_prompt,
     load_prompt_spec,
-    render_template,
-    Document,
-    Example,
     render_system,
+    render_template,
+    spec_version,
 )
 
 VALID = """\
@@ -29,6 +31,56 @@ examples:
     assistant: |
       안녕하세요!
 """
+
+
+def make_spec(**overrides):
+    fields = dict(id="chat", description="d", variables=(), system="S", examples=())
+    return PromptSpec(**{**fields, **overrides})
+
+
+def test_spec_version_is_short_and_stable():
+    assert spec_version(make_spec()) == spec_version(make_spec())
+    assert len(spec_version(make_spec())) == 12
+
+
+@pytest.mark.parametrize("change", [{"system": "S2"}, {"examples": (Example("u", "a"),)}], ids=["system", "examples"])
+def test_spec_version_changes_when_model_input_changes(change):
+    assert spec_version(make_spec(**change)) != spec_version(make_spec())
+
+
+@pytest.mark.parametrize("change", [{"id": "other"}, {"description": "다른 설명"}], ids=["id", "description"])
+def test_spec_version_ignores_fields_the_model_never_sees(change):
+    assert spec_version(make_spec(**change)) == spec_version(make_spec())
+
+
+def test_spec_version_ignores_yaml_formatting_and_comments(tmp_path):
+    other = tmp_path / "other.yaml"
+    other.write_text(
+        '# 주석\nid: "chat"\ndescription: 다른 설명\nvariables: ["name"]\nsystem: "너는 ${name}의 비서야"\n',
+        encoding="utf-8",
+    )
+
+    assert spec_version(load_prompt_spec(write(tmp_path, VALID))) == spec_version(load_prompt_spec(other))
+
+
+def test_metadata_reports_counts_and_size():
+    prompt = build_prompt(system="SS", user_input="q", history=turn("u", "a"), documents=[Document("d.txt", "doc")])
+
+    meta = prompt.metadata()
+
+    assert meta["message_count"] == 3
+    assert meta["dropped_turns"] == 0
+    assert meta["document_count"] == 1
+    assert meta["total_chars"] == len(prompt.system) + sum(len(m.content) for m in prompt.messages)
+
+
+def test_metadata_contains_no_content():
+    secret = "hunter2"
+    prompt = build_prompt(
+        system=f"S{secret}", user_input=secret, history=turn(secret, secret), documents=[Document(secret, secret)]
+    )
+
+    assert secret not in json.dumps(prompt.metadata())
 
 
 def test_examples_are_optional(tmp_path):

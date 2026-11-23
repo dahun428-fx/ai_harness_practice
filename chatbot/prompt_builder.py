@@ -9,6 +9,12 @@
     messages : 사용자 입력과 외부 문서. 신뢰하지 않는다. 절대 system에 넣지 않는다.
 """
 
+# hashlib: sha256 등 해시 함수. 프롬프트 정의가 바뀌었는지 짧은 지문(spec_version)으로 비교하는 데 쓴다.
+import hashlib
+
+# json: 해시할 내용을 키 순서·공백이 고정된 문자열로 바꾸는 데 쓴다(정규화).
+import json
+
 # Sequence: list, tuple 등 "순서가 있고 인덱스로 접근할 수 있는 것"을 모두 받는 추상 타입
 from collections.abc import Sequence
 
@@ -29,7 +35,6 @@ from xml.sax.saxutils import escape
 
 # PyYAML: 프롬프트 파일(prompts/*.yaml)을 읽는 데 쓰는 외부 라이브러리
 import yaml
-
 
 # ---------------------------------------------------------------------------
 # 예외
@@ -71,6 +76,22 @@ class Prompt:
     messages: tuple[Message, ...]
     # 예산 때문에 버린 대화 턴(user+assistant 쌍)의 수. 기본값 0이라 기존 호출은 그대로 동작한다.
     dropped_turns: int = 0
+    # 현재 사용자 메시지에 넣은 외부 문서의 수
+    document_count: int = 0
+
+    def metadata(self) -> dict:
+        """턴마다 기록할 개수·크기 정보. 내용은 절대 담지 않는다(운영 로그에도 남길 수 있게)."""
+        return {
+            # 모델에 보내는 메시지 수 (system 제외)
+            "message_count": len(self.messages),
+            # 예산 때문에 버린 대화 턴 수
+            "dropped_turns": self.dropped_turns,
+            # 이번 턴에 붙인 문서 수
+            "document_count": self.document_count,
+            # 예산과 같은 단위(_size)로 센다. 나중에 토큰 단위로 바꿔도 예산과 기록이 어긋나지 않는다.
+            # _size는 이 클래스보다 아래에 정의돼 있지만 괜찮다: 이름은 메서드가 "호출될 때" 찾는다.
+            "total_chars": _size(self.system) + sum(_size(m.content) for m in self.messages),
+        }
 
 
 # 외부 문서(검색 결과, 파일 내용 등). 우리가 쓰지 않은, 신뢰하지 않는 텍스트다.
@@ -122,6 +143,23 @@ _EXAMPLE_TAGS = ("examples", "example", "user", "assistant")
 # ---------------------------------------------------------------------------
 # 시스템 지시 렌더링 (템플릿 + 예시)
 # ---------------------------------------------------------------------------
+
+
+def spec_version(spec: PromptSpec) -> str:
+    """프롬프트 정의 중 '모델이 받는 텍스트를 결정하는 것'만 해시한 버전 문자열(12자리).
+
+    - system(템플릿)과 examples만 넣는다. id, description은 모델이 보지 않으므로 뺀다.
+    - 렌더링 결과가 아니라 템플릿을 해시한다. ${today} 같은 변수 값이 바뀌어도 버전은 그대로다.
+    - 파일 바이트가 아니라 파싱한 내용을 해시한다. YAML 주석·따옴표·들여쓰기는 버전에 영향이 없다.
+    - 조립 규칙 코드(태그 형식 등)의 변화는 여기서 잡지 않는다. git_commit과 스냅샷 테스트가 맡는다.
+    """
+    # 해시할 내용. 튜플/dataclass는 JSON으로 바꿀 수 없으므로 dict 리스트로 펼친다.
+    content = {"system": spec.system, "examples": [{"user": e.user, "assistant": e.assistant} for e in spec.examples]}
+    # 정규화: 키 순서 고정(sort_keys), 공백 없는 구분자, 한글을 \uXXXX로 바꾸지 않음(ensure_ascii=False).
+    # 지금은 dict를 늘 같은 순서로 만들어 sort_keys가 없어도 결과가 같지만, 키 순서를 바꾸는 리팩터링에 대비한 방어다.
+    canonical = json.dumps(content, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    # sha256 → 16진수 문자열 → 앞 12자리 (tracing.prompt_version과 같은 길이)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
 
 
 def render_template(text: str, variables: dict[str, str]) -> str:
@@ -271,7 +309,7 @@ def build_prompt(
     # 남은 쌍들을 다시 한 줄로 펼치고(이중 for), 맨 뒤에 이번 턴의 user 메시지를 붙인다.
     # 사용자 입력(과 문서)은 messages에만 들어가고 system에는 들어가지 않는다.
     messages = tuple(m for t in turns for m in t) + (Message(role="user", content=current),)
-    return Prompt(system=system, messages=messages, dropped_turns=dropped)
+    return Prompt(system=system, messages=messages, dropped_turns=dropped, document_count=len(documents))
 
 
 # ---------------------------------------------------------------------------

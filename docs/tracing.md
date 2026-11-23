@@ -29,8 +29,12 @@
 | - | - |
 | `session_id` | 앱이 만든 세션 ID (12자리) |
 | `git_commit`, `git_dirty` | 어떤 코드로 대화했는지. 커밋하지 않은 변경이 있으면 `git_dirty: true` |
-| `prompt_version` | 시스템 프롬프트의 SHA-256 앞 12자리 |
+| `prompt_id` | 프롬프트 파일의 `id` (`prompts/chat.yaml` → `chat`) |
+| `prompt_version` | 프롬프트 파일의 의미 내용(템플릿 `system` + `examples`)을 정규화한 JSON의 SHA-256 앞 12자리. `id`·`description`·YAML 주석·서식·변수 값에는 영향받지 않는다 |
+| `system_hash` | 실제로 보낸 시스템 프롬프트 텍스트의 SHA-256 앞 12자리 |
 | `system_prompt` | 시스템 프롬프트 원문 |
+
+> **2026-11-23 계산 방식 변경:** 이전 트레이스의 `prompt_version`은 렌더링된 시스템 프롬프트의 해시였다. 이 값은 이제 `system_hash`이고, `prompt_version`은 프롬프트 정의의 해시다. 이전 트레이스와 비교할 때는 `system_hash`(새) = `prompt_version`(이전)으로 잇는다.
 
 ### `turn` (사용자 입력 한 번마다. `exit`/`quit`은 기록하지 않음)
 
@@ -39,6 +43,7 @@
 | `session_id`, `turn` | 세션 안에서 1부터 증가 |
 | `input.raw` | 사용자가 입력한 원문 (깨진 입력 포함) |
 | `input.normalized`, `input.ok`, `input.error` | 입력처리기 결과 |
+| `prompt` | 거부되지 않았을 때만. 프롬프트 구성기가 조립한 결과의 개수·크기(`message_count`, `dropped_turns`, `document_count`, `total_chars`). 내용은 담지 않는다 |
 | `output` | 거부되지 않았을 때만. `text`(응답 원문), `model`, `stop_reason`, `is_error`, `num_turns`, `duration_ms`, `duration_api_ms`, `cost_usd`, `usage`(토큰), `sdk_session_id` |
 | `error` | SDK 오류로 응답을 받지 못했을 때 `"오류종류: 메시지"` |
 
