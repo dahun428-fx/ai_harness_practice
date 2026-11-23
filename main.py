@@ -138,8 +138,23 @@ async def ask(client: ClaudeSDKClient, prompt: Prompt) -> dict:
     return {"text": "".join(parts), "model": model, **outcome}
 
 
-async def main(tracer: TraceWriter, session_id: str, spec: PromptSpec, system_prompt: str) -> None:
-    """대화 루프. 프롬프트는 __main__에서 읽고 렌더링한 결과를 인자로 받는다(테스트에서 가짜를 넣을 수 있게)."""
+async def main(
+    tracer: TraceWriter,
+    session_id: str,
+    spec: PromptSpec,
+    system_prompt: str,
+    # * 뒤의 인자는 키워드로만 넘길 수 있다. 실수로 위치 인자로 섞이지 않게 한다.
+    *,
+    # SDK 클라이언트를 만드는 함수. 기본은 실제 ClaudeSDKClient, 테스트에서는 가짜 클라이언트를 만드는 함수.
+    client_factory=ClaudeSDKClient,
+    # 한 줄 입력을 받는 함수. 기본은 키보드(input), 테스트에서는 정해진 입력을 차례로 돌려주는 함수.
+    read_input=read_user_input,
+) -> None:
+    """대화 루프.
+
+    외부와 닿는 것(프롬프트, 트레이스, SDK 클라이언트, 입력)은 모두 인자로 받는다.
+    __main__은 실제 것을 넘기고, 테스트는 가짜를 넘겨 SDK 호출 없이 흐름을 검증한다(tests/test_main.py).
+    """
     # SDK 세션 설정
     options = ClaudeAgentOptions(
         # 인자로 받은 렌더링 결과를 그대로 쓴다. 여기서 다시 렌더링하면 모델에 보낸 프롬프트와
@@ -168,10 +183,10 @@ async def main(tracer: TraceWriter, session_id: str, spec: PromptSpec, system_pr
     # 이 세션에서 기록한 턴 수 (exit/quit은 세지 않는다)
     turn = 0
     # async with: 블록을 벗어날 때(정상 종료든 예외든) SDK 연결을 정리한다
-    async with ClaudeSDKClient(options=options) as client:
+    async with client_factory(options=options) as client:
         while True:
             # 한 줄 입력. None이면 Ctrl+C / Ctrl+D
-            raw = read_user_input()
+            raw = read_input()
             if raw is None:
                 # 입력 줄 뒤에 줄바꿈을 넣어 터미널 프롬프트가 같은 줄에 붙지 않게 한다
                 print()
