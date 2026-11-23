@@ -16,12 +16,14 @@ pytest                                  # all tests
 pytest tests/test_input_processor.py -k nfc   # single test by name
 python evals/run_input_eval.py          # eval gate; exit 1 on failure; logs to evals/results/
 python evals/run_input_eval.py --id <case-id>        # inspect one eval case
+python evals/run_prompt_eval.py         # prompt builder eval gate (level 1: deterministic, no model calls)
+UPDATE_SNAPSHOTS=1 pytest tests/test_prompt_snapshots.py   # regenerate prompt snapshots, then review the diff
 python evals/generate_random_cases.py --seed 7 --count 300 --out evals/tmp.jsonl   # fuzz cases (don't commit)
 python main.py                          # run the chatbot (LOG_LEVEL=DEBUG for chatbot.* debug logs, TRACE=0 to disable traces)
 python evals/traces_to_cases.py         # turn traces into eval candidates (evals/candidates.jsonl) for human review
 ```
 
-CI (`.github/workflows/ci.yml`) runs pytest, the eval gate, and 5 random seeds × 300 cases on every push/PR.
+CI (`.github/workflows/ci.yml`) runs pytest, the input eval gate, the prompt eval gate, and 5 random seeds × 300 cases on every push/PR.
 
 ## Architecture
 

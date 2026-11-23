@@ -26,6 +26,9 @@ jobs:
       - name: Eval gate (EDD)
         run: python evals/run_input_eval.py --no-log
 
+      - name: Prompt builder eval gate (EDD level 1)
+        run: python evals/run_prompt_eval.py
+
       - name: Random eval across seeds
         run: |
           for seed in 1 2 3 4 5; do
