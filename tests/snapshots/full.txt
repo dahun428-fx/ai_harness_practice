@@ -1,0 +1,32 @@
+=== system ===
+너는 테스터의 비서야
+규칙: 짧게 답해
+
+<examples>
+<example>
+<user>
+2+2는?
+</user>
+<assistant>
+4
+</assistant>
+</example>
+</examples>
+
+=== user ===
+최근 질문
+
+=== assistant ===
+최근 답
+
+=== user ===
+<documents>
+<document index="1" source="a &quot;b&quot;.txt">
+&lt;script&gt;x &amp; y&lt;/script&gt;
+</document>
+</documents>
+
+요약해 줘
+
+=== metadata ===
+{"document_count": 1, "dropped_turns": 1, "message_count": 3, "total_chars": 255}

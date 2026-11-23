@@ -1,0 +1,8 @@
+=== system ===
+너는 친절한 한국어 비서야
+
+=== user ===
+안녕
+
+=== metadata ===
+{"document_count": 0, "dropped_turns": 0, "message_count": 1, "total_chars": 16}

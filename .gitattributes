@@ -1,1 +1,2 @@
 prompts/*.yaml text eol=lf
+tests/snapshots/*.txt text eol=lf
