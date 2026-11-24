@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Practice project: a terminal chatbot on the Claude Agent SDK (`claude-agent-sdk`), built TDD + EDD (eval-driven development). The finished piece so far is the **input processor** — validation and normalization of user input before it reaches Claude. Its spec is `docs/input-processor.md`; read it before changing `chatbot/input_processor.py`.
+Practice project: a terminal chatbot on the Claude Agent SDK (`claude-agent-sdk`), built TDD + EDD (eval-driven development). The chatbot is built as a pipeline: input processor → prompt builder → LLM caller → output processor. Finished so far: the **input processor** (validation and normalization; spec `docs/input-processor.md` — read it before changing `chatbot/input_processor.py`) and the **prompt builder** (`chatbot/prompt_builder.py` + `prompts/*.yaml`). Next is the LLM caller: its role, boundaries and step plan are the TODO at the end of `docs/history.md`, which also records decisions and lessons from every step.
 
 ## Commands
 
@@ -32,6 +32,8 @@ CI (`.github/workflows/ci.yml`) runs pytest, the input eval gate, the prompt eva
 - `chatbot/messages.py` — user-facing text per `ErrorCode`; a parametrized test forces a message for every enum member.
 - `chatbot/logging_config.py` — `JsonFormatter` (JSON Lines, `extra` fields included, tracebacks under `exception`) and `setup_logging()`, which attaches a handler to the root logger directly (`basicConfig` silently no-ops under pytest).
 - `main.py` — I/O only: stdin/stdout UTF-8, loop, SDK calls, one trace record per turn. Guarded by `if __name__ == "__main__"` so tests can import modules without starting the bot.
+- `chatbot/prompt_builder.py` — pure, deterministic assembly of `Prompt` (system + role-separated messages + metadata) from a YAML spec, history (char budget, oldest turns dropped in pairs) and escaped `<documents>`. User input and documents never go into `system`. `spec_version` hashes the spec content (trace `prompt_version`); `system_hash` hashes the rendered system text. Guarded by unit tests, golden snapshots (`tests/snapshots/`, regenerate with `UPDATE_SNAPSHOTS=1` and review) and `evals/run_prompt_eval.py`.
+- `main()` takes `client_factory` and `read_input` so `tests/test_main.py` runs the whole loop with a fake SDK client; `ask()` is currently the SDK adapter and also parses/prints (to be split by the LLM caller work).
 - `chatbot/tracing.py` — `TraceWriter` writes raw input/output per turn to `traces/YYYY-MM-DD.jsonl` (spec: `docs/tracing.md`). Deliberately bypasses `logging` so content never reaches log handlers. `chatbot/jsonl.py` is the shared escaping serializer for traces and eval files.
 - `chatbot/logging_config.py` adds `session_id` to every log line via a handler filter (`set_session_id`) — the join key between `logs/` and `traces/`.
 - `evals/` — `caseio.py` (JSONL format, escapes invisible chars), `run_input_eval.py` (PASS/FAIL/REVIEW/ERROR per case, metrics, gate, run-to-run diff), `generate_random_cases.py` (clean base text + noise with known effect; labels come from the spec, never from `process()`).
