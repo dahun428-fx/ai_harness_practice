@@ -7,9 +7,9 @@ class FakeCaller(BaseCaller):
     # 트레이스·로그에서 어느 공급자였는지 구분하는 이름
     provider = "fake"
 
-    def __init__(self, responses):
+    def __init__(self, responses, model=None):
         # 부모(BaseCaller)의 상태(_opened, _current)를 먼저 초기화한다. 빠뜨리면 stream()에서 AttributeError.
-        super().__init__()
+        super().__init__(model=model)
         # responses: 호출 한 번마다 내보낼 이벤트 목록의 목록. 예) [[e1, e2], [e3]] = 첫 호출 e1,e2 / 두 번째 e3
         # list()로 복사한다: pop으로 꺼내 쓰므로, 테스트가 넘긴 원본 리스트를 망가뜨리지 않게
         self._responses = list(responses)
