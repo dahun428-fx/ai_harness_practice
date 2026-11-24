@@ -3,3 +3,5 @@ line-length = 120
 
 [tool.ruff]
 line-length = 120
+# 프로젝트는 Python 3.12 (CI도 3.12). 지정하지 않으면 ruff가 옛 버전을 가정해 aiter/anext(3.10+)를 모른다
+target-version = "py312"
